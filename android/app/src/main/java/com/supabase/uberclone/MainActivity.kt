@@ -17,7 +17,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -37,10 +41,17 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import com.supabase.uberclone.ui.theme.UberCloneTheme
 import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.functions.Functions
+import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.gotrue.Auth
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
+import io.ktor.client.call.body
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,13 +74,37 @@ class MainActivity : ComponentActivity() {
 }
 
 val supabase = createSupabaseClient(
-    supabaseUrl = "https://bxqrmzvwscpmnimeeesf.supabase.co",
-    supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4cXJtenZ3c2NwbW5pbWVlZXNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTI3NTU4NDAsImV4cCI6MjAwODMzMTg0MH0.GZBcMyenIRwCyyFdapZQGSX07iIjjitUU0Zsus1an50"
+//    supabaseUrl = "http://127.0.0.1:54321",
+    supabaseUrl = "http://10.0.2.2:54321",
+    supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
 ) {
     install(Auth)
     install(Postgrest)
     install(Realtime)
+    install(Functions)
 }
+
+
+@Serializable
+data class GeoJsonLinestring(
+    val coordinates: Array<Array<Double>>
+)
+
+@Serializable
+data class Polyline(
+    val geoJsonLinestring: GeoJsonLinestring
+)
+
+@Serializable
+data class Leg(
+    val polyline: Polyline
+)
+
+@Serializable
+data class RouteResponse(
+    val legs: Array<Leg>
+)
+
 
 @Composable
 fun HomePage(name: String, modifier: Modifier = Modifier) {
@@ -82,27 +117,43 @@ fun HomePage(name: String, modifier: Modifier = Modifier) {
 
     val composableScope = rememberCoroutineScope()
 
+    var polylinePoints by remember { mutableStateOf(emptyList<LatLng>()) }
+
+
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                markerState.position = LatLng(1.3501, 103.87)
+//                markerState.position = LatLng(1.3501, 103.87)
 
-//                val client = HttpClient()
                 composableScope.launch {
+                    val position = cameraPositionState.position.target
+                    println(position)
+                    val res = supabase.functions.invoke(
+                        function = "route",
+                        body = buildJsonObject {
+                            putJsonObject("origin") {
+                                put("latitude", markerState.position.latitude)
+                                put("longitude", markerState.position.longitude)
+                            }
+                            putJsonObject("destination") {
+                                put("latitude", position.latitude)
+                                put("longitude", position.longitude)
+                            }
+                        }
+                    )
 
-//                    val response: HttpResponse =
-//                        client.request("https://routes.googleapis.com/directions/v2:computeRoutes") {
-//                            method = HttpMethod.Post
-//                            headers {
-//                                append(
-//                                    "X-Goog-FieldMask",
-//                                    "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"
-//                                )
-//                                append("X-Goog-Api-Key", "")
-//                            }
-//                            contentType(ContentType.Application.Json)
-//                            setBody(mapOf("a" to "f"))
-//                        }
+                    val data = res.body<RouteResponse>()
+
+                    println(data)
+                    polylinePoints = data.legs[0].polyline.geoJsonLinestring.coordinates.map {
+                        LatLng(it[1], it[0])
+                    }
+//                    polylinePoints = listOf(
+//                        LatLng(1.35, 103.87),
+//                        LatLng(1.354, 103.81)
+//                    )
+                    println("polyline below")
+                    println(polylinePoints.toString())
                 }
             }) {
                 Icon(Icons.Default.Add, contentDescription = "Add")
@@ -126,11 +177,12 @@ fun HomePage(name: String, modifier: Modifier = Modifier) {
                 width = 20f,
                 startCap = RoundCap(),
                 endCap = RoundCap(),
-                points = listOf(
-
-                    LatLng(1.34819, 103.87223),
-                    LatLng(1.36, 103.87),
-                )
+                points = polylinePoints
+//                listOf(
+//
+//                    LatLng(1.34819, 103.87223),
+//                    LatLng(1.36, 103.87),
+//                )
             )
             MapMarker(
                 state = markerState,
