@@ -1,21 +1,37 @@
+@file:OptIn(
+    ExperimentalMaterial3Api::class, ExperimentalMaterial3Api::class,
+    ExperimentalMaterial3Api::class, ExperimentalMaterial3Api::class
+)
+
 package com.supabase.uberclone
 
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.location.Location
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,9 +39,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.checkSelfPermission
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -63,7 +83,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    HomePage("Uber Clone")
+                    HomePage()
                 }
 
                 // A surface container using the 'background' color from the theme
@@ -106,91 +126,199 @@ data class RouteResponse(
 )
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomePage(name: String, modifier: Modifier = Modifier) {
-    val markerState = rememberMarkerState(position = LatLng(1.35, 103.87))
+fun HomePage() {
+    val carMarkerState = rememberMarkerState(position = LatLng(1.35, 103.87))
+    val destinationMarkerState = rememberMarkerState(position = LatLng(1.35, 103.87))
+
 
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(markerState.position, 16f)
+        position = CameraPosition.fromLatLngZoom(carMarkerState.position, 16f)
     }
+
     val context = LocalContext.current
+
+    var isMyLocationEnabled by remember {
+        mutableStateOf(
+            PackageManager.PERMISSION_GRANTED == checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            )
+        )
+    }
 
     val composableScope = rememberCoroutineScope()
 
     var polylinePoints by remember { mutableStateOf(emptyList<LatLng>()) }
 
+    val locationPermissions = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
+
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            val permissionsGranted =
+                permissions.values.reduce { acc, isPermissionGranted ->
+                    acc && isPermissionGranted
+                }
+
+            if (permissionsGranted) {
+                println("my location enabled")
+                isMyLocationEnabled = true
+                getLocation(context = context, onLocationResult = {
+                    cameraPositionState.move(
+                        update = CameraUpdateFactory.newLatLng(
+                            LatLng(
+                                it.latitude,
+                                it.longitude
+                            )
+                        )
+                    )
+                })
+            } else {
+                //Logic when the permissions were not granted by the user
+
+            }
+        })
+
 
     Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text("Supabase Uber")
+                }
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-//                markerState.position = LatLng(1.3501, 103.87)
 
-                composableScope.launch {
-                    val position = cameraPositionState.position.target
-                    println(position)
-                    val res = supabase.functions.invoke(
-                        function = "route",
-                        body = buildJsonObject {
-                            putJsonObject("origin") {
-                                put("latitude", markerState.position.latitude)
-                                put("longitude", markerState.position.longitude)
+
+                val cameraPosition = cameraPositionState.position.target
+
+                destinationMarkerState.position = cameraPosition
+
+                getLocation(context = context, onLocationResult = {
+                    composableScope.launch {
+                        val res = supabase.functions.invoke(
+                            function = "route",
+                            body = buildJsonObject {
+                                putJsonObject("origin") {
+                                    put("latitude", it.latitude)
+                                    put("longitude", it.longitude)
+                                }
+                                putJsonObject("destination") {
+                                    put("latitude", cameraPosition.latitude)
+                                    put("longitude", cameraPosition.longitude)
+                                }
                             }
-                            putJsonObject("destination") {
-                                put("latitude", position.latitude)
-                                put("longitude", position.longitude)
+                        )
+
+                        val data = res.body<RouteResponse>()
+
+                        polylinePoints =
+                            data.legs[0].polyline.geoJsonLinestring.coordinates.map {
+                                LatLng(it[1], it[0])
                             }
-                        }
-                    )
-
-                    val data = res.body<RouteResponse>()
-
-                    println(data)
-                    polylinePoints = data.legs[0].polyline.geoJsonLinestring.coordinates.map {
-                        LatLng(it[1], it[0])
                     }
-//                    polylinePoints = listOf(
-//                        LatLng(1.35, 103.87),
-//                        LatLng(1.354, 103.81)
-//                    )
-                    println("polyline below")
-                    println(polylinePoints.toString())
-                }
+                })
+
+
             }) {
                 Icon(Icons.Default.Add, contentDescription = "Add")
             }
         }
     ) {
-        it
-        GoogleMap(
-            modifier = Modifier
-                .fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(
-                isMyLocationEnabled = PackageManager.PERMISSION_GRANTED == checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                ),
-                mapStyleOptions = MapStyleOptions.loadRawResourceStyle(context, R.raw.map_style),
-            )
-        ) {
-            Polyline(
-                width = 20f,
-                startCap = RoundCap(),
-                endCap = RoundCap(),
-                points = polylinePoints
-//                listOf(
-//
-//                    LatLng(1.34819, 103.87223),
-//                    LatLng(1.36, 103.87),
-//                )
-            )
-            MapMarker(
-                state = markerState,
-                title = "Car",
-                context = LocalContext.current,
-                iconResourceId = R.drawable.car,
-            )
+        Column(modifier = Modifier.padding(it)) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = "Current location",
+                    color = Color.Blue,
+                    modifier = Modifier.padding(4.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFFDDDDDD))
+                        .fillMaxWidth()
+                ) {
+                    Text(text = "Where to", color = Color.Gray, modifier = Modifier.padding(4.dp))
+                }
+            }
+            GoogleMap(
+                modifier = Modifier
+                    .fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                onMapLoaded = {
+                    val locationPermissionsAlreadyGranted = checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (locationPermissionsAlreadyGranted) {
+                        // move camera to the location
+                        getLocation(context = context, onLocationResult = {
+                            cameraPositionState.move(
+                                update = CameraUpdateFactory.newLatLng(
+                                    LatLng(
+                                        it.latitude,
+                                        it.longitude
+                                    )
+                                )
+                            )
+                        })
+                    } else {
+                        locationPermissionLauncher.launch(locationPermissions)
+
+                    }
+                },
+                properties = MapProperties(
+                    isMyLocationEnabled = isMyLocationEnabled,
+                    mapStyleOptions = MapStyleOptions.loadRawResourceStyle(
+                        context,
+                        R.raw.map_style
+                    ),
+                )
+            ) {
+                Polyline(
+                    width = 16f,
+                    startCap = RoundCap(),
+                    endCap = RoundCap(),
+                    points = polylinePoints
+                )
+                MapMarker(
+                    state = carMarkerState,
+                    title = "Car",
+                    context = LocalContext.current,
+                    iconResourceId = R.drawable.car,
+                )
+                Marker(
+                    state = destinationMarkerState,
+                )
+            }
         }
+    }
+}
+
+private fun getLocation(context: Context, onLocationResult: (Location) -> Unit) {
+    val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+    if (checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED && checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED
+    ) {
+        return
+    }
+    fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+        location?.let { onLocationResult(it) }
     }
 }
 
