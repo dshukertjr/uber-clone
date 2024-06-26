@@ -39,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,40 +75,34 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.gotrue.Auth
+import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.rpc
+import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.postgresSingleDataFlow
 import io.ktor.client.call.body
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlin.time.Duration
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent {
-            UberCloneTheme {
-
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    HomePage()
-                }
-
-                // A surface container using the 'background' color from the theme
-
-            }
-        }
-    }
-}
-
 val supabase = createSupabaseClient(
 //    supabaseUrl = "http://127.0.0.1:54321",
-    supabaseUrl = "http://10.0.2.2:54321",
-    supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+//    supabaseUrl = "http://10.0.2.2:54321",
+//    supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+    supabaseUrl = "https://rmjwhnhfotnpbnjfnxka.supabase.co",
+    supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtandobmhmb3RucGJuamZueGthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTkzNzMzODYsImV4cCI6MjAzNDk0OTM4Nn0.l5C85uPdndHNWDQPXr8OPPBOjqCgnsn2bvhWtiTy328"
 ) {
     install(Auth)
     install(Postgrest)
@@ -120,7 +115,8 @@ enum class AppPhase {
     SELECT_DESTINATION,
     CONFIRM_FAIR,
     WAITING_PICKUP,
-    IN_CAR
+    IN_CAR,
+    AFTER_RIDE,
 }
 
 
@@ -145,16 +141,115 @@ data class RouteResponse(
     val duration: String
 )
 
+@Serializable
+data class Driver(
+    val id: String,
+    val model: String,
+    val number: String,
+    val latitude: Double,
+    val longitude: Double
+)
+
+@Serializable
+enum class RideStatus {
+    @SerialName("picking_up")
+    PickingUp,
+
+    @SerialName("riding")
+    Riding,
+
+    @SerialName("completed")
+    Completed,
+}
+
+@Serializable
+data class Ride(
+    val id: String,
+    val status: RideStatus
+)
+
+@Serializable
+data class FindDriverResponse(
+    @SerialName("driver_id")
+    val driverId: String,
+    @SerialName("ride_id")
+    val rideId: String
+)
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            UberCloneTheme {
+
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+//                    HomePage()
+                    SomePage()
+                }
+
+                // A surface container using the 'background' color from the theme
+
+            }
+        }
+    }
+}
+
+@Composable
+fun SomePage() {
+    val composableScope = rememberCoroutineScope()
+
+    Column(
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Button(onClick = {
+            composableScope.launch {
+                val channel = supabase.channel("channelId") {
+                    //optional config
+                }
+                val changeFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public")
+
+
+                changeFlow.catch {
+                    println("error ❌❌❌")
+                    println(it)
+                }.collect {
+                    when (it) {
+                        is PostgresAction.Delete -> println("Deleted: ${it.oldRecord}")
+                        is PostgresAction.Insert -> println("Inserted: ${it.record}")
+                        is PostgresAction.Select -> println("Selected: ${it.record}")
+                        is PostgresAction.Update -> println("Updated: ${it.oldRecord} with ${it.record}")
+                    }
+                }
+
+                channel.subscribe()
+
+
+            }
+        }) {
+            Text("press")
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomePage() {
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            supabase.auth.signInAnonymously()
+        }
+    }
+
     val carMarkerState = rememberMarkerState(position = LatLng(40.7531074, -73.9940147))
     val destinationMarkerState = rememberMarkerState(position = LatLng(40.7531074, -73.9940147))
 
 
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(carMarkerState.position, 16f)
+        position = CameraPosition.fromLatLngZoom(carMarkerState.position, 14f)
     }
 
     val context = LocalContext.current
@@ -171,10 +266,13 @@ fun HomePage() {
 
     var appPhase by remember { mutableStateOf(AppPhase.SELECT_DESTINATION) }
 
+    var origin by remember { mutableStateOf(LatLng(0.0, 0.0)) }
 
     var tripDuration by remember { mutableStateOf(Duration.ZERO) }
 
-    var loadingPath by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    var driver by remember { mutableStateOf<Driver?>(null) }
 
     val composableScope = rememberCoroutineScope()
 
@@ -221,13 +319,14 @@ fun HomePage() {
                 Button(onClick = {
 
                     appPhase = AppPhase.CONFIRM_FAIR
-                    loadingPath = true
+                    isLoading = true
 
                     val cameraPosition = cameraPositionState.position.target
 
                     destinationMarkerState.position = cameraPosition
 
                     getLocation(context = context, onLocationResult = {
+                        origin = LatLng(it.latitude, it.longitude)
                         composableScope.launch {
                             val res = supabase.functions.invoke(
                                 function = "route",
@@ -249,7 +348,7 @@ fun HomePage() {
                                 data.legs[0].polyline.geoJsonLinestring.coordinates.map {
                                     LatLng(it[1], it[0])
                                 }
-                            loadingPath = false
+                            isLoading = false
 
                             // Move the camera so that the entire path is present
                             val builder = LatLngBounds.Builder()
@@ -349,10 +448,10 @@ fun HomePage() {
                 Column(
                     modifier = Modifier
                         .padding(24.dp)
-                        .align(if (loadingPath) Alignment.CenterHorizontally else Alignment.Start),
+                        .align(if (isLoading) Alignment.CenterHorizontally else Alignment.Start),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    if (loadingPath) {
+                    if (isLoading) {
                         Box(
                             modifier = Modifier
                                 .padding(bottom = 24.dp)
@@ -384,8 +483,119 @@ fun HomePage() {
                         Button(onClick = {
                             appPhase = AppPhase.WAITING_PICKUP
                             // Find nearby taxi
+                            composableScope.launch {
+                                val destinationLocation = destinationMarkerState.position
+                                val findRideResponse =
+                                    supabase.postgrest.rpc("find_driver", buildJsonObject {
+                                        put(
+                                            "origin",
+                                            "POINT(${origin.longitude} ${origin.latitude})"
+                                        )
+                                        put(
+                                            "destination",
+                                            "POINT(${destinationLocation.longitude} ${destinationLocation.latitude})"
+                                        )
+                                        put("fare", calculateFare(tripDuration))
+                                    }).decodeSingleOrNull<FindDriverResponse>()
+
+                                println("ride ID \uD83C\uDF89\uD83C\uDF89\uD83C\uDF89")
+                                println(findRideResponse)
+                                if (findRideResponse == null) {
+                                    Toast.makeText(
+                                        context,
+                                        "There are no available driver right now. Please try again later.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    return@launch
+                                }
+
+                                // setup realtime listener
+                                val channel = supabase.channel("ride")
+
+//                                val rideFlow: Flow<Ride> = channel.postgresSingleDataFlow(
+//                                    schema = "public",
+//                                    table = "rides",
+//                                    primaryKey = Ride::id
+//                                ) {
+//                                    //This is the same filter as used in postgrest, so you could use complex queries, but only one entry is fetched
+//                                    eq("id", findRideResponse.rideId)
+//                                }
+//
+//                                rideFlow.collect {
+//                                    println("rideFlow")
+//                                    println(it)
+//                                    it.status
+//                                }
+
+                                val driverFlow: Flow<Driver> = channel.postgresSingleDataFlow(
+                                    schema = "public",
+                                    table = "drivers",
+                                    primaryKey = Driver::id
+                                ) {
+                                    eq("id", findRideResponse.driverId)
+                                }
+
+                                driverFlow.collect {
+                                    println(it)
+                                    driver = it
+                                }
+
+//                                val changeFlow = channel.postgresChangeFlow<PostgresAction>(
+//                                    schema = "public",
+//                                ) {
+//                                    table = "drivers"
+//                                    filter("id", FilterOperator.EQ, findRideResponse.driverId)
+//                                }
+//
+////Collect the flow
+//                                changeFlow.collect {
+//                                    println(it)
+//                                    when (it) {
+//                                        is PostgresAction.Delete -> println("Deleted: ${it.oldRecord}")
+//                                        is PostgresAction.Insert -> println("Inserted: ${it.record}")
+//                                        is PostgresAction.Select -> println("Selected: ${it.record}")
+//                                        is PostgresAction.Update -> println("Updated: ${it.oldRecord} with ${it.record}")
+//                                    }
+//                                }
+
+                                channel.subscribe()
+                            }
                         }) {
                             Text("Confirm Pickup")
+                        }
+                    }
+                }
+            }
+        } else if (appPhase == AppPhase.WAITING_PICKUP) {
+            ModalBottomSheet(onDismissRequest = {
+                appPhase = AppPhase.CONFIRM_FAIR
+            }) {
+                if (driver == null) {
+                    Box(
+                        modifier = Modifier
+                            .padding(24.dp)
+                            .align(Alignment.CenterHorizontally)
+                    ) {
+                        Box(Modifier.padding(bottom = 24.dp)) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .width(64.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Column(Modifier.padding(24.dp)) {
+                        Text("A ride is on your way", fontSize = 20.sp)
+                        val labelFontSize = 12.sp
+                        Row {
+                            Column(Modifier.weight(1f)) {
+                                Text("Car Model", fontSize = labelFontSize)
+                                Text(driver!!.model)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text("Vehicle Number", fontSize = labelFontSize)
+                                Text(driver!!.number)
+                            }
                         }
                     }
                 }
@@ -396,7 +606,7 @@ fun HomePage() {
 
 /** Returns the trip fair in cents. */
 private fun calculateFare(duration: Duration): Int {
-    return (duration.inWholeMinutes * 20).toInt()
+    return (duration.inWholeMinutes * 40).toInt()
 }
 
 private fun getFareString(duration: Duration): String {

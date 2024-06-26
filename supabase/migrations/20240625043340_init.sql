@@ -62,15 +62,15 @@ execute function update_driver_status();
 
 -- Finds the closest available driver within 3000m radius
 create function public.find_driver(origin geography(POINT), destination geography(POINT), fare int)
-    returns uuid
+    returns table(driver_id uuid, ride_id uuid)
     language plpgsql
     as $$
         declare
-            driver_id uuid;
-            ride_id uuid;
+            v_driver_id uuid;
+            v_ride_id uuid;
         begin
             select 
-                drivers.id into driver_id
+                drivers.id into v_driver_id
             from public.drivers
             where is_available = true
                 and st_dwithin(origin, location, 3000) 
@@ -78,13 +78,14 @@ create function public.find_driver(origin geography(POINT), destination geograph
             limit 1;
 
             -- return null if no available driver is found
-            if driver_id is null then
-                return null;
+            if v_driver_id is null then
+                return;
             end if;
 
             insert into public.rides (driver_id, passenger_id, origin, destination, fare)
-            values (driver_id, auth.uid(), origin, destination, fare)
-            returning id into ride_id;
+            values (v_driver_id, auth.uid(), origin, destination, fare)
+            returning id into v_ride_id;
 
-            return ride_id;
-    end $$;
+            return query
+                select v_driver_id as driver_id, v_ride_id as ride_id;
+    end $$ security definer;
