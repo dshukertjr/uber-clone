@@ -36,6 +36,12 @@ Deno.serve(async (req) => {
     },
   );
 
+  if (!response.ok) {
+    const error = await response.json();
+    console.error({ error });
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
   const data = await response.json();
 
   const res = data.routes[0];
