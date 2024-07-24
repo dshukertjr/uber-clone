@@ -76,7 +76,7 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:realtime-kt")
     implementation("io.github.jan-tennert.supabase:functions-kt")
 
-    implementation("io.ktor:ktor-client-android:2.3.11")
+    implementation("io.ktor:ktor-client-okhttp:2.3.11")
 
     implementation("com.google.maps.android:maps-compose:4.4.1")
 }

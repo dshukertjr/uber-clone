@@ -81,13 +81,15 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.postgresSingleDataFlow
 import io.ktor.client.call.body
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -187,7 +189,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
 //                    HomePage()
-                    SomePage()
+                    TestPage()
                 }
 
                 // A surface container using the 'background' color from the theme
@@ -198,8 +200,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun SomePage() {
+fun TestPage() {
     val composableScope = rememberCoroutineScope()
+    val composableScope2 = rememberCoroutineScope()
 
     Column(
         verticalArrangement = Arrangement.Center,
@@ -207,16 +210,30 @@ fun SomePage() {
     ) {
         Button(onClick = {
             composableScope.launch {
+                @Serializable
+                data class Message(val content: String, val sender: String)
+
                 val channel = supabase.channel("channelId") {
-                    //optional config
+                    // optional config
                 }
+
+                val broadcastFlow = channel.broadcastFlow<Message>(event = "message")
+
+                // Collect the flow
+                broadcastFlow.onEach { //it: Message
+                    println(it)
+                }.launchIn(composableScope)
+
+                channel.subscribe(blockUntilSubscribed = true)
+
+                channel.broadcast(event = "message", Message("I joined!", "John"))
+
+                val channel = supabase.channel("channelId")
                 val changeFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public")
 
+                channel.subscribe()
 
-                changeFlow.catch {
-                    println("error ❌❌❌")
-                    println(it)
-                }.collect {
+                changeFlow.collect {
                     when (it) {
                         is PostgresAction.Delete -> println("Deleted: ${it.oldRecord}")
                         is PostgresAction.Insert -> println("Inserted: ${it.record}")
@@ -224,9 +241,7 @@ fun SomePage() {
                         is PostgresAction.Update -> println("Updated: ${it.oldRecord} with ${it.record}")
                     }
                 }
-
-                channel.subscribe()
-
+//                    .launchIn(composableScope)
 
             }
         }) {
