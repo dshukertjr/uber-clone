@@ -16,7 +16,7 @@ const supabaseKey =
 const googleMapsApiKey = 'AIzaSyCXohGOxjuDI0U-AGE2i1AHNeyKJDEIkmw';
 
 // Replace with an actual ride ID from your database
-const rideId = '699deaaf-c9f9-4fc4-95e7-e8a6e6dbe96a';
+const rideId = '2fdc13c2-abbf-4eda-a69f-5d104f72aed9';
 
 void main() async {
   final supabase = SupabaseClient(supabaseUrl, supabaseKey);
@@ -24,6 +24,8 @@ void main() async {
   // Fetch ride details and driver location using the custom Postgres function
   final response = await supabase
       .rpc('get_ride_and_driver', params: {'ride_id': rideId}).single();
+
+  print(response);
 
   final driverId = response['driver_id'];
   final origin = response['origin'];

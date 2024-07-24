@@ -246,7 +246,9 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
   }
 
   void _onCameraMove(CameraPosition position) {
-    _selectedDestination = position.target;
+    if (_appState == AppState.choosingLocation) {
+      _selectedDestination = position.target;
+    }
   }
 
   Future<void> _confirmLocation() async {
