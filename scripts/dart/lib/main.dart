@@ -4,26 +4,22 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:supabase/supabase.dart';
 
-// Replace with your Supabase URL and API key
-// const supabaseUrl = 'YOUR_SUPABASE_URL';
-// const supabaseKey = 'YOUR_SUPABASE_API_KEY';
-const supabaseUrl = 'https://rmjwhnhfotnpbnjfnxka.supabase.co';
+const supabaseUrl = 'https://szooyrexjzmsnjuprczd.supabase.co';
 const supabaseKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtandobmhmb3RucGJuamZueGthIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTcxOTM3MzM4NiwiZXhwIjoyMDM0OTQ5Mzg2fQ._xwaTLH27ndiqYzuWpDjWpZDJgx90B5BeJXQ_2uSSNY';
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN6b295cmV4anptc25qdXByY3pkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTcyMTgxNTY3MCwiZXhwIjoyMDM3MzkxNjcwfQ.LDv7t7Yq7BI9RxZ0_i9lhBEQwbIMXXQEKwK7K1Yu19c';
 
-// Replace with your Google Maps API key
-// const googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY';
-const googleMapsApiKey = 'AIzaSyCXohGOxjuDI0U-AGE2i1AHNeyKJDEIkmw';
+const googleMapsApiKey =
+    'AIzaSyCXohGOxjuDI0U-AGE2i1AHNeyKJDEIkmw';
 
 // Replace with an actual ride ID from your database
-const rideId = '2fdc13c2-abbf-4eda-a69f-5d104f72aed9';
+const rideId = '0649f0b1-8018-4a21-9931-e17a93728506';
 
 void main() async {
   final supabase = SupabaseClient(supabaseUrl, supabaseKey);
 
   // Fetch ride details and driver location using the custom Postgres function
-  final response = await supabase
-      .rpc('get_ride_and_driver', params: {'ride_id': rideId}).single();
+  final response = await supabase.rpc('get_ride_and_driver',
+      params: {'ride_id': rideId}).single();
 
   print(response);
 
@@ -33,8 +29,8 @@ void main() async {
   final driverLocation = response['driver_location'];
 
   // Get route from driver to pickup location
-  final pickupRoute =
-      await getRoute(origin: driverLocation, destination: origin);
+  final pickupRoute = await getRoute(
+      origin: driverLocation, destination: origin);
 
   // Simulate driver picking up passenger
   await simulateDriving(
@@ -45,10 +41,13 @@ void main() async {
   );
 
   // Update ride status to 'riding'
-  await supabase.from('rides').update({'status': 'riding'}).eq('id', rideId);
+  await supabase
+      .from('rides')
+      .update({'status': 'riding'}).eq('id', rideId);
 
   // Get route from pickup to destination
-  final rideRoute = await getRoute(origin: origin, destination: destination);
+  final rideRoute =
+      await getRoute(origin: origin, destination: destination);
 
   // Simulate ride to destination
   await simulateDriving(
@@ -59,7 +58,9 @@ void main() async {
   );
 
   // Update ride status to 'completed'
-  await supabase.from('rides').update({'status': 'completed'}).eq('id', rideId);
+  await supabase
+      .from('rides')
+      .update({'status': 'completed'}).eq('id', rideId);
 
   print('Ride simulation completed');
 }
@@ -81,7 +82,10 @@ Future<List<Map<String, double>>> getRoute({
       body: jsonEncode({
         'origin': {
           'location': {
-            'latLng': {'latitude': origin['lat'], 'longitude': origin['lng']}
+            'latLng': {
+              'latitude': origin['lat'],
+              'longitude': origin['lng']
+            }
           }
         },
         'destination': {
@@ -98,8 +102,8 @@ Future<List<Map<String, double>>> getRoute({
 
   if (response.statusCode == 200) {
     final data = json.decode(response.body);
-    final steps = data['routes'][0]['legs'][0]['polyline']['geoJsonLinestring']
-        ['coordinates'] as List<dynamic>;
+    final steps = data['routes'][0]['legs'][0]['polyline']
+        ['geoJsonLinestring']['coordinates'] as List<dynamic>;
 
     return steps.map<Map<String, double>>((step) {
       return {
@@ -120,24 +124,12 @@ Future<void> simulateDriving({
   required SupabaseClient supabase,
   required String driverId,
   required List<Map<String, double>> route,
-  // required int durationInSeconds,
 }) async {
-  final totalSteps = route.length;
-  // final stepsPerSecond = totalSteps / durationInSeconds;
-
-  // for (var i = 0; i < totalSteps; i += stepsPerSecond.round()) {
-  //   final location = route[i];
-  //   await supabase.from('drivers').update({
-  //     'location': 'POINT(${location['lng']} ${location['lat']})',
-  //   }).eq('id', driverId);
-  //   await Future.delayed(Duration(seconds: 1));
-  // }
-
   for (var i = 0; i < route.length; i++) {
     final location = route[i];
     await supabase.from('drivers').update({
       'location': 'POINT(${location['lng']} ${location['lat']})',
     }).eq('id', driverId);
-    await Future.delayed(Duration(seconds: 1));
+    await Future.delayed(Duration(milliseconds: 300));
   }
 }
