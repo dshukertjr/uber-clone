@@ -23,6 +23,7 @@ class MainApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const MaterialApp(
+      debugShowCheckedModeBanner: false,
       home: Scaffold(
         body: UberCloneMainScreen(),
       ),
@@ -402,6 +403,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
         markerId: const MarkerId('driver'),
         position: driver.location,
         icon: _carIcon!,
+        anchor: const Offset(0.5, 0.5),
         rotation: rotation,
       ));
 
@@ -421,7 +423,6 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
           max(_currentDriver!.location.longitude, target.longitude),
         ),
       );
-      print(bounds);
       _mapController.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
     }
   }
