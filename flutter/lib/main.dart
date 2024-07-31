@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:duration/duration.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
@@ -16,6 +17,8 @@ void main() async {
   );
   runApp(const MainApp());
 }
+
+final supabase = Supabase.instance.client;
 
 class MainApp extends StatelessWidget {
   const MainApp({super.key});
@@ -106,28 +109,21 @@ class UberCloneMainScreen extends StatefulWidget {
 }
 
 class UberCloneMainScreenState extends State<UberCloneMainScreen> {
-  final _supabase = Supabase.instance.client;
   AppState _appState = AppState.choosingLocation;
   late GoogleMapController _mapController;
-  CameraPosition _initialPosition = const CameraPosition(
-    target: LatLng(37.7749, -122.4194),
-    zoom: 14.0,
-  );
+
   LatLng? _selectedDestination;
   LatLng? _currentLocation;
   final Set<Polyline> _polylines = {};
-  // VziFGVpVmqSP082n
-  Duration? _routeDuration;
+  final Set<Marker> _markers = {};
 
   /// Fare in cents
   int? _fare;
   StreamSubscription<dynamic>? _driverSubscription;
   StreamSubscription<dynamic>? _rideSubscription;
-  Driver? _currentDriver;
-  Ride? _currentRide;
-  final Set<Marker> _markers = {};
+  Driver? _driver;
+
   LatLng? _previousDriverLocation;
-  Image? _centerPinImage;
   BitmapDescriptor? _pinIcon;
   BitmapDescriptor? _carIcon;
 
@@ -136,8 +132,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
     super.initState();
     _signInIfNotSignedIn();
     _checkLocationPermission();
-    _loadPinIcon();
-    _loadCarIcon();
+    _loadIcons();
   }
 
   @override
@@ -147,9 +142,9 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
   }
 
   Future<void> _signInIfNotSignedIn() async {
-    if (_supabase.auth.currentSession == null) {
+    if (supabase.auth.currentSession == null) {
       try {
-        await _supabase.auth.signInAnonymously();
+        await supabase.auth.signInAnonymously();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -167,21 +162,20 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
     // Test if location services are enabled.
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      return Future.error('Location services are disabled.');
+      return _askForLocationPermission();
     }
 
     permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        return Future.error('Location permissions are denied');
+        return _askForLocationPermission();
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
       // Permissions are denied forever, handle appropriately.
-      return Future.error(
-          'Location permissions are permanently denied, we cannot request permissions.');
+      return _askForLocationPermission();
     }
 
     // When we reach here, permissions are granted and we can
@@ -189,52 +183,71 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
     _getCurrentLocation();
   }
 
+  /// Shows a modal to ask for location permission.
+  Future<void> _askForLocationPermission() async {
+    return showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Location Permission'),
+            content: const Text(
+                'This app needs location permission to work properly.'),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () {
+                  SystemChannels.platform.invokeMethod('SystemNavigator.pop');
+                },
+                child: const Text('Close App'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await Geolocator.openLocationSettings();
+                },
+                child: const Text('Open Settings'),
+              ),
+            ],
+          );
+        });
+  }
+
   Future<void> _getCurrentLocation() async {
     try {
       Position position = await Geolocator.getCurrentPosition();
       setState(() {
         _currentLocation = LatLng(position.latitude, position.longitude);
-        _initialPosition = CameraPosition(
-          target: _currentLocation!,
-          zoom: 14.0,
-        );
       });
+      final cameraPosition = CameraPosition(
+        target: _currentLocation!,
+        zoom: 14.0,
+      );
       _mapController
-          .animateCamera(CameraUpdate.newCameraPosition(_initialPosition));
+          .animateCamera(CameraUpdate.newCameraPosition(cameraPosition));
     } catch (e) {
-      print("Error getting location: $e");
-      // Handle the error appropriately. Maybe set a default location or show an error message to the user.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Error occured while getting the current location')));
+      }
     }
   }
 
-  Future<void> _loadPinIcon() async {
-    const ImageConfiguration imageConfiguration =
-        ImageConfiguration(size: Size(48, 48));
+  /// Loads the icon images used for markers
+  Future<void> _loadIcons() async {
+    const imageConfiguration = ImageConfiguration(size: Size(48, 48));
     _pinIcon = await BitmapDescriptor.asset(
         imageConfiguration, 'assets/images/pin.png');
-  }
-
-  Future<void> _loadCarIcon() async {
     _carIcon = await BitmapDescriptor.asset(
-      const ImageConfiguration(size: Size(48, 48)),
+      imageConfiguration,
       'assets/images/car.png',
     );
   }
 
   void _goToNextState() {
     setState(() {
-      if (_appState.index < AppState.values.length - 1) {
+      if (_appState == AppState.postRide) {
         _appState = AppState.values[_appState.index + 1];
       } else {
         _appState = AppState.choosingLocation;
-      }
-    });
-  }
-
-  void _goToPreviousState() {
-    setState(() {
-      if (_appState.index > 0) {
-        _appState = AppState.values[_appState.index - 1];
       }
     });
   }
@@ -248,7 +261,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
   Future<void> _confirmLocation() async {
     if (_selectedDestination != null && _currentLocation != null) {
       try {
-        final response = await _supabase.functions.invoke(
+        final response = await supabase.functions.invoke(
           'route',
           body: {
             'origin': {
@@ -265,7 +278,8 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
         final data = response.data as Map<String, dynamic>;
         final coordinates = data['legs'][0]['polyline']['geoJsonLinestring']
             ['coordinates'] as List<dynamic>;
-        final duration = data['duration'] as String;
+        final duration = parseDuration(data['duration'] as String);
+        _fare = ((duration.inMinutes * 40)).ceil();
 
         final List<LatLng> polylineCoordinates = coordinates.map((coord) {
           return LatLng(coord[1], coord[0]);
@@ -278,8 +292,6 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
             color: Colors.black,
             width: 5,
           ));
-          _routeDuration = parseDuration(duration);
-          _fare = ((_routeDuration!.inMinutes * 40)).ceil();
 
           _markers.add(Marker(
             markerId: const MarkerId('destination'),
@@ -319,9 +331,12 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
     }
   }
 
+  /// Finds a nearby driver
+  ///
+  /// When a driver is found, it subscribes to the driver's location and ride status.
   Future<void> _findDriver() async {
     try {
-      final response = await _supabase.rpc('find_driver', params: {
+      final response = await supabase.rpc('find_driver', params: {
         'origin':
             'POINT(${_currentLocation!.longitude} ${_currentLocation!.latitude})',
         'destination':
@@ -329,57 +344,57 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
         'fare': _fare,
       }) as List<dynamic>;
 
-      if (response.isNotEmpty) {
-        String driverId = response.first['driver_id'];
-        String rideId = response.first['ride_id'];
-
-        _driverSubscription = _supabase
-            .from('drivers')
-            .stream(primaryKey: ['id'])
-            .eq('id', driverId)
-            .listen((List<Map<String, dynamic>> data) {
-              if (data.isNotEmpty) {
-                setState(() {
-                  _currentDriver = Driver.fromJson(data[0]);
-                });
-                _updateDriverMarker(_currentDriver!);
-                _adjustMapView(
-                    target: _appState == AppState.waitingForPickup
-                        ? _currentLocation!
-                        : _selectedDestination!);
-              }
-            });
-
-        _rideSubscription = _supabase
-            .from('rides')
-            .stream(primaryKey: ['id'])
-            .eq('id', rideId)
-            .listen((List<Map<String, dynamic>> data) {
-              if (data.isNotEmpty) {
-                setState(() {
-                  _currentRide = Ride.fromJson(data[0]);
-                  if (_currentRide!.status == RideStatus.riding &&
-                      _appState != AppState.riding) {
-                    _appState = AppState.riding;
-                  } else if (_currentRide!.status == RideStatus.completed &&
-                      _appState != AppState.postRide) {
-                    _appState = AppState.postRide;
-                    _cancelSubscriptions();
-                    _showCompletionModal();
-                  }
-                });
-              }
-            });
-
-        _goToNextState();
-      } else {
+      if (response.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
                 content: Text('No driver found. Please try again later.')),
           );
         }
+        return;
       }
+      String driverId = response.first['driver_id'];
+      String rideId = response.first['ride_id'];
+
+      _driverSubscription = supabase
+          .from('drivers')
+          .stream(primaryKey: ['id'])
+          .eq('id', driverId)
+          .listen((List<Map<String, dynamic>> data) {
+            if (data.isNotEmpty) {
+              setState(() {
+                _driver = Driver.fromJson(data[0]);
+              });
+              _updateDriverMarker(_driver!);
+              _adjustMapView(
+                  target: _appState == AppState.waitingForPickup
+                      ? _currentLocation!
+                      : _selectedDestination!);
+            }
+          });
+
+      _rideSubscription = supabase
+          .from('rides')
+          .stream(primaryKey: ['id'])
+          .eq('id', rideId)
+          .listen((List<Map<String, dynamic>> data) {
+            if (data.isNotEmpty) {
+              setState(() {
+                final ride = Ride.fromJson(data[0]);
+                if (ride.status == RideStatus.riding &&
+                    _appState != AppState.riding) {
+                  _appState = AppState.riding;
+                } else if (ride.status == RideStatus.completed &&
+                    _appState != AppState.postRide) {
+                  _appState = AppState.postRide;
+                  _cancelSubscriptions();
+                  _showCompletionModal();
+                }
+              });
+            }
+          });
+
+      _goToNextState();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -412,15 +427,15 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
   }
 
   void _adjustMapView({required LatLng target}) {
-    if (_currentDriver != null && _selectedDestination != null) {
+    if (_driver != null && _selectedDestination != null) {
       LatLngBounds bounds = LatLngBounds(
         southwest: LatLng(
-          min(_currentDriver!.location.latitude, target.latitude),
-          min(_currentDriver!.location.longitude, target.longitude),
+          min(_driver!.location.latitude, target.latitude),
+          min(_driver!.location.longitude, target.longitude),
         ),
         northeast: LatLng(
-          max(_currentDriver!.location.latitude, target.latitude),
-          max(_currentDriver!.location.longitude, target.longitude),
+          max(_driver!.location.latitude, target.latitude),
+          max(_driver!.location.longitude, target.longitude),
         ),
       );
       _mapController.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
@@ -439,6 +454,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
     _rideSubscription?.cancel();
   }
 
+  /// Shows a modal to indicate that the ride has been completed.
   void _showCompletionModal() {
     showDialog(
       context: context,
@@ -466,9 +482,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
     setState(() {
       _appState = AppState.choosingLocation;
       _selectedDestination = null;
-      _currentDriver = null;
-      _currentRide = null;
-      _routeDuration = null;
+      _driver = null;
       _fare = null;
       _polylines.clear();
       _markers.clear();
@@ -477,27 +491,81 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
     _getCurrentLocation();
   }
 
-  Widget _buildBottomSheet() {
+  String _getAppBarTitle() {
     switch (_appState) {
+      case AppState.choosingLocation:
+        return 'Choose Location';
       case AppState.confirmingFare:
-        return Container(
-          width: MediaQuery.of(context).size.width,
-          padding: const EdgeInsets.all(16)
-              .copyWith(bottom: 16 + MediaQuery.of(context).padding.bottom),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.5),
-                spreadRadius: 5,
-                blurRadius: 7,
-                offset: const Offset(0, 3),
+        return 'Confirm Fare';
+      case AppState.waitingForPickup:
+        return 'Waiting for Pickup';
+      case AppState.riding:
+        return 'On the Way';
+      case AppState.postRide:
+        return 'Ride Completed';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_getAppBarTitle()),
+      ),
+      body: Stack(
+        children: [
+          _currentLocation == null
+              ? const Center(child: CircularProgressIndicator())
+              : GoogleMap(
+                  initialCameraPosition: const CameraPosition(
+                    target: LatLng(37.7749, -122.4194),
+                    zoom: 14.0,
+                  ),
+                  onMapCreated: (GoogleMapController controller) {
+                    _mapController = controller;
+                  },
+                  myLocationEnabled: true,
+                  onCameraMove: _onCameraMove,
+                  polylines: _polylines,
+                  markers: _markers,
+                ),
+          if (_appState == AppState.choosingLocation)
+            Center(
+              child: Image.asset(
+                'assets/images/center-pin.png',
+                width: 96,
+                height: 96,
               ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+            ),
+        ],
+      ),
+      floatingActionButton: _appState == AppState.choosingLocation
+          ? FloatingActionButton.extended(
+              onPressed: _confirmLocation,
+              label: const Text('Confirm Destination'),
+              icon: const Icon(Icons.check),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      bottomSheet: Container(
+        width: MediaQuery.of(context).size.width,
+        padding: const EdgeInsets.all(16)
+            .copyWith(bottom: 16 + MediaQuery.of(context).padding.bottom),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.5),
+              spreadRadius: 5,
+              blurRadius: 7,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_appState == AppState.confirmingFare) ...[
               Text('Confirm Fare',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 16),
@@ -517,112 +585,23 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
                 child: const Text('Confirm Fare'),
               ),
             ],
-          ),
-        );
-      case AppState.waitingForPickup:
-        if (_currentDriver == null) {
-          return const SizedBox.shrink();
-        }
-        return Container(
-          width: MediaQuery.of(context).size.width,
-          padding: const EdgeInsets.all(16)
-              .copyWith(bottom: 16 + MediaQuery.of(context).padding.bottom),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.5),
-                spreadRadius: 5,
-                blurRadius: 7,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            if (_appState == AppState.waitingForPickup && _driver != null) ...[
               Text('Your Driver',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
-              Text('Car: ${_currentDriver!.model}',
+              Text('Car: ${_driver!.model}',
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              Text('Plate Number: ${_currentDriver!.number}',
+              Text('Plate Number: ${_driver!.number}',
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 16),
               Text(
                   'Your driver is on the way. Please wait at the pickup location.',
                   style: Theme.of(context).textTheme.bodyMedium),
-            ],
-          ),
-        );
-      default:
-        return const SizedBox.shrink();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        leading: _appState != AppState.choosingLocation
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: _goToPreviousState,
-              )
-            : null,
-        title: Text(_getAppBarTitle()),
+            ]
+          ],
+        ),
       ),
-      body: Stack(
-        children: [
-          _currentLocation == null
-              ? const Center(child: CircularProgressIndicator())
-              : GoogleMap(
-                  initialCameraPosition: _initialPosition,
-                  onMapCreated: (GoogleMapController controller) {
-                    _mapController = controller;
-                  },
-                  myLocationButtonEnabled: true,
-                  myLocationEnabled: true,
-                  onCameraMove: _onCameraMove,
-                  polylines: _polylines,
-                  markers: _markers,
-                ),
-          if (_appState == AppState.choosingLocation)
-            Center(
-              child: Image.asset(
-                'assets/images/center-pin.png',
-                width: 100,
-                height: 100,
-              ),
-            ),
-        ],
-      ),
-      floatingActionButton: _appState == AppState.choosingLocation
-          ? FloatingActionButton.extended(
-              onPressed: _confirmLocation,
-              label: const Text('Confirm Destination'),
-              icon: const Icon(Icons.check),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      bottomSheet: _buildBottomSheet(),
     );
-  }
-
-  String _getAppBarTitle() {
-    switch (_appState) {
-      case AppState.choosingLocation:
-        return 'Choose Location';
-      case AppState.confirmingFare:
-        return 'Confirm Fare';
-      case AppState.waitingForPickup:
-        return 'Waiting for Pickup';
-      case AppState.riding:
-        return 'On the Way';
-      case AppState.postRide:
-        return 'Ride Completed';
-    }
   }
 }

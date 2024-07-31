@@ -1,3 +1,3 @@
-# uber
+# Uber clone with Flutter app
 
-A new Flutter project.
+Watch the full video guide on how to build this app: https://youtu.be/cL4pVpaOH9o
