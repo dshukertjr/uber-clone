@@ -11,9 +11,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() async {
   await Supabase.initialize(
-    url: 'https://rmjwhnhfotnpbnjfnxka.supabase.co',
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtandobmhmb3RucGJuamZueGthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTkzNzMzODYsImV4cCI6MjAzNDk0OTM4Nn0.l5C85uPdndHNWDQPXr8OPPBOjqCgnsn2bvhWtiTy328',
+    url: 'SUPABASE_URL',
+    anonKey: 'SUPABASE_ANON_KEY',
   );
   runApp(const MainApp());
 }
@@ -110,7 +109,11 @@ class UberCloneMainScreen extends StatefulWidget {
 
 class UberCloneMainScreenState extends State<UberCloneMainScreen> {
   AppState _appState = AppState.choosingLocation;
-  late GoogleMapController _mapController;
+  GoogleMapController? _mapController;
+  CameraPosition _initialCameraPosition = const CameraPosition(
+    target: LatLng(37.7749, -122.4194),
+    zoom: 14.0,
+  );
 
   LatLng? _selectedDestination;
   LatLng? _currentLocation;
@@ -186,6 +189,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
   /// Shows a modal to ask for location permission.
   Future<void> _askForLocationPermission() async {
     return showDialog(
+        barrierDismissible: false,
         context: context,
         builder: (context) {
           return AlertDialog(
@@ -216,14 +220,15 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
       Position position = await Geolocator.getCurrentPosition();
       setState(() {
         _currentLocation = LatLng(position.latitude, position.longitude);
+        _initialCameraPosition = CameraPosition(
+          target: _currentLocation!,
+          zoom: 14.0,
+        );
       });
-      final cameraPosition = CameraPosition(
-        target: _currentLocation!,
-        zoom: 14.0,
-      );
-      _mapController
-          .animateCamera(CameraUpdate.newCameraPosition(cameraPosition));
+      _mapController?.animateCamera(
+          CameraUpdate.newCameraPosition(_initialCameraPosition));
     } catch (e) {
+      debugPrint(e.toString());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Error occured while getting the current location')));
@@ -319,7 +324,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
                 .reduce((a, b) => a > b ? a : b),
           ),
         );
-        _mapController.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
+        _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
         _goToNextState();
       } catch (e) {
         if (mounted) {
@@ -438,7 +443,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
           max(_driver!.location.longitude, target.longitude),
         ),
       );
-      _mapController.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
+      _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
     }
   }
 
@@ -517,10 +522,7 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
           _currentLocation == null
               ? const Center(child: CircularProgressIndicator())
               : GoogleMap(
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(37.7749, -122.4194),
-                    zoom: 14.0,
-                  ),
+                  initialCameraPosition: _initialCameraPosition,
                   onMapCreated: (GoogleMapController controller) {
                     _mapController = controller;
                   },
@@ -547,61 +549,65 @@ class UberCloneMainScreenState extends State<UberCloneMainScreen> {
             )
           : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      bottomSheet: Container(
-        width: MediaQuery.of(context).size.width,
-        padding: const EdgeInsets.all(16)
-            .copyWith(bottom: 16 + MediaQuery.of(context).padding.bottom),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.5),
-              spreadRadius: 5,
-              blurRadius: 7,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_appState == AppState.confirmingFare) ...[
-              Text('Confirm Fare',
-                  style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 16),
-              Text(
-                  'Estimated fare: ${NumberFormat.currency(
-                    symbol:
-                        '\$', // You can change this to your preferred currency symbol
-                    decimalDigits: 2,
-                  ).format(_fare! / 100)}',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _findDriver,
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 50),
-                ),
-                child: const Text('Confirm Fare'),
+      bottomSheet: _appState == AppState.confirmingFare ||
+              _appState == AppState.waitingForPickup
+          ? Container(
+              width: MediaQuery.of(context).size.width,
+              padding: const EdgeInsets.all(16)
+                  .copyWith(bottom: 16 + MediaQuery.of(context).padding.bottom),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.5),
+                    spreadRadius: 5,
+                    blurRadius: 7,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-            ],
-            if (_appState == AppState.waitingForPickup && _driver != null) ...[
-              Text('Your Driver',
-                  style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text('Car: ${_driver!.model}',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Text('Plate Number: ${_driver!.number}',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 16),
-              Text(
-                  'Your driver is on the way. Please wait at the pickup location.',
-                  style: Theme.of(context).textTheme.bodyMedium),
-            ]
-          ],
-        ),
-      ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_appState == AppState.confirmingFare) ...[
+                    Text('Confirm Fare',
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 16),
+                    Text(
+                        'Estimated fare: ${NumberFormat.currency(
+                          symbol:
+                              '\$', // You can change this to your preferred currency symbol
+                          decimalDigits: 2,
+                        ).format(_fare! / 100)}',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _findDriver,
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      child: const Text('Confirm Fare'),
+                    ),
+                  ],
+                  if (_appState == AppState.waitingForPickup &&
+                      _driver != null) ...[
+                    Text('Your Driver',
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    Text('Car: ${_driver!.model}',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text('Plate Number: ${_driver!.number}',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 16),
+                    Text(
+                        'Your driver is on the way. Please wait at the pickup location.',
+                        style: Theme.of(context).textTheme.bodyMedium),
+                  ]
+                ],
+              ),
+            )
+          : const SizedBox.shrink(),
     );
   }
 }
