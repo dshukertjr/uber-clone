@@ -12,7 +12,7 @@ Follow the video guide to build the app: https://youtu.be/cL4pVpaOH9o
 
 ### Link Supabase project
 
-Run `supabase link` to link the project to a remote Supabase project. Once linked, run `supabase secrets set --env-file ./supabase/functions/.env` to set the environment variables.
+Run `supabase link` to link the project to a remote Supabase project.
 
 ### Database migrations
 
@@ -20,7 +20,7 @@ Run `supabase db push` to push the migrations to the Supabase database.
 
 ### Edge functions
 
-Copy the `.env.example` file to `.env` and paste your own Google Cloud Platform API key. Make sure the Routes API is enabled for the key.
+Copy the `supabase/functions/.env.example` file to `supabase/functions/.env` and paste your own Google Cloud Platform API key. Make sure the Routes API is enabled for the key. Run `supabase secrets set --env-file ./supabase/functions/.env` to set the environment variables.
 
 ### Flutter
 
